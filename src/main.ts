@@ -5,6 +5,8 @@ import { startApp } from "./app";
 import "./style.css";
 
 const filters = [{ name: "littleKanban project", extensions: ["littlekanban"] }];
+const markdownFilters = [{ name: "Markdown files", extensions: ["md"] }];
+
 const app = startApp(document.body, {
   chooseNewProject: () => save({ filters, defaultPath: "Project.littlekanban" }),
   chooseProject: () => open({ filters, multiple: false }),
@@ -14,6 +16,17 @@ const app = startApp(document.body, {
     contents: `${JSON.stringify(project, null, 2)}\n`,
     previous,
   }),
+  exportMarkdown: async (_path, content) => {
+    const path = await save({ filters: markdownFilters, defaultPath: "ticket.md" });
+    if (!path) return null;
+    await invoke<string>("write_file", { path, contents: content });
+    return path;
+  },
+  importMarkdown: async () => {
+    const path = await open({ filters: markdownFilters, multiple: false });
+    if (!path) return null;
+    return invoke<string>("read_file", { path });
+  },
 });
 
 const window = getCurrentWindow();
