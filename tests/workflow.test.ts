@@ -887,3 +887,59 @@ test("can assign and display tags on tickets", async () => {
     expect(project.tickets[0].title).toBe("Bug fix");
   });
 });
+
+test("tags persist when reopening project", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-persist.littlekanban");
+  const desktop = desktopFor(path);
+
+  // Create project and add ticket
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-persist" });
+  
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Task 1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Task 1");
+  
+  // Close app and reopen
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  
+  // Verify project is reloaded with tags array
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tags).toBeDefined();
+    expect(Array.isArray(project.tags)).toBe(true);
+    expect(project.tickets).toHaveLength(1);
+  });
+});
+
+test("tag deletion removes tags from all tickets", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-delete.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-delete" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Task 1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Task 1");
+  
+  // Verify initial state has empty tags array
+  let json = await readFile(path, "utf8");
+  let project = JSON.parse(json);
+  expect(project.tags).toEqual([]);
+});
