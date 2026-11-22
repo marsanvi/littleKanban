@@ -62,6 +62,19 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           <button type="submit">Add ticket</button>
         </form>
         <button type="button" id="retry" hidden>Retry save</button>
+        <button type="button" id="manage-tags">Manage tags</button>
+        <div id="tags-panel" hidden>
+          <h3>Project Tags</h3>
+          <form id="add-tag-form">
+            <label for="tag-name">Tag name</label>
+            <input id="tag-name" required maxlength="100" autocomplete="off">
+            <label for="tag-color">Color</label>
+            <input id="tag-color" type="color" value="#3b82f6">
+            <button type="submit">Add tag</button>
+          </form>
+          <ul id="tags-list"></ul>
+          <button type="button" id="close-tags">Close</button>
+        </div>
         <div id="edit-panel" hidden>
           <h3>Edit Ticket</h3>
           <label for="edit-title">Title</label>
@@ -96,6 +109,13 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   const board = element("#board");
   const title = element<HTMLInputElement>("#title");
   const retry = element<HTMLButtonElement>("#retry");
+  const manageTags = element<HTMLButtonElement>("#manage-tags");
+  const tagsPanel = element("#tags-panel");
+  const addTagForm = element<HTMLFormElement>("#add-tag-form");
+  const tagNameInput = element<HTMLInputElement>("#tag-name");
+  const tagColorInput = element<HTMLInputElement>("#tag-color");
+  const tagsList = element<HTMLUListElement>("#tags-list");
+  const closeTagsBtn = element<HTMLButtonElement>("#close-tags");
   const editPanel = element("#edit-panel");
   const editTitle = element<HTMLInputElement>("#edit-title");
   const editBody = element<HTMLTextAreaElement>("#edit-body");
@@ -153,7 +173,68 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           item.appendChild(bodyDiv);
         }
         
+        // Display assigned tags
+        if (ticket.tagIds && ticket.tagIds.length > 0 && project) {
+          const tagsDiv = document.createElement("div");
+          tagsDiv.style.marginTop = "0.5em";
+          tagsDiv.style.display = "flex";
+          tagsDiv.style.gap = "0.5em";
+          tagsDiv.style.flexWrap = "wrap";
+          
+          ticket.tagIds.forEach((tagId) => {
+            const tag = project!.tags.find((t) => t.id === tagId);
+            if (tag) {
+              const tagSpan = document.createElement("span");
+              tagSpan.textContent = tag.name;
+              tagSpan.style.padding = "0.25em 0.5em";
+              tagSpan.style.borderRadius = "0.25em";
+              tagSpan.style.fontSize = "0.9em";
+              if (tag.color) {
+                tagSpan.style.backgroundColor = tag.color;
+                tagSpan.style.color = "white";
+              } else {
+                tagSpan.style.backgroundColor = "#e5e7eb";
+                tagSpan.style.color = "#1f2937";
+              }
+              tagsDiv.appendChild(tagSpan);
+            }
+          });
+          
+          item.appendChild(tagsDiv);
+        }
+        
         item.appendChild(createButton(`Edit`, `edit ${ticket.title}`, () => openEditPanel(ticket)));
+        
+        // Add tag management button
+        if (project && project.tags.length > 0) {
+          item.appendChild(createButton("Manage tags", `manage tags for ${ticket.title}`, () => {
+            const unassignedTags = project!.tags.filter((tag) => !ticket.tagIds?.includes(tag.id));
+            if (unassignedTags.length > 0) {
+              const tagName = prompt(
+                `Add tag to "${ticket.title}":\n${unassignedTags.map((t) => t.name).join(", ")}`
+              );
+              if (tagName) {
+                const tag = project!.tags.find((t) => t.name === tagName.trim());
+                if (tag) {
+                  void addTagToTicket(ticket.id, tag.id);
+                }
+              }
+            } else if (ticket.tagIds && ticket.tagIds.length > 0) {
+              const removeTagName = prompt(
+                `Remove tag from "${ticket.title}":\n${ticket.tagIds
+                  .map((id) => project!.tags.find((t) => t.id === id)?.name)
+                  .filter(Boolean)
+                  .join(", ")}`
+              );
+              if (removeTagName) {
+                const tag = project!.tags.find((t) => t.name === removeTagName.trim());
+                if (tag) {
+                  void removeTagFromTicket(ticket.id, tag.id);
+                }
+              }
+            }
+          }));
+        }
         
         // Add move buttons for status transitions
         if (status === "todo") {
@@ -207,6 +288,31 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   function closeEditPanel(): void {
     editingTicketId = null;
     editPanel.hidden = true;
+  }
+
+  function renderTagsList(): void {
+    if (!project) return;
+    tagsList.replaceChildren(...project.tags.map((tag) => {
+      const item = document.createElement("li");
+      const span = document.createElement("span");
+      span.textContent = tag.name;
+      if (tag.color) {
+        span.style.color = tag.color;
+        span.style.fontWeight = "bold";
+      }
+      item.appendChild(span);
+      
+      item.appendChild(createButton("Rename", `rename ${tag.name}`, () => {
+        const newName = prompt("New tag name:", tag.name);
+        if (newName && newName.trim()) {
+          void renameTag(tag.id, newName.trim());
+        }
+      }));
+      
+      item.appendChild(createButton("Delete", `delete ${tag.name}`, () => void deleteTag(tag.id)));
+      
+      return item;
+    }));
   }
 
   async function moveTicket(ticketId: string, newStatus: "todo" | "in-progress" | "done"): Promise<void> {
@@ -471,6 +577,25 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   
   closeArchiveBtn.addEventListener("click", () => {
     archivePanel.hidden = true;
+  });
+
+  manageTags.addEventListener("click", () => {
+    tagsPanel.hidden = false;
+    renderTagsList();
+  });
+
+  closeTagsBtn.addEventListener("click", () => {
+    tagsPanel.hidden = true;
+  });
+
+  addTagForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = tagNameInput.value.trim();
+    const color = tagColorInput.value;
+    if (!name) return;
+    void addTag(name, color);
+    tagNameInput.value = "";
+    tagColorInput.value = "#3b82f6";
   });
   
   retry.addEventListener("click", () => void save());

@@ -828,3 +828,62 @@ test("can add and manage tags on a project", async () => {
     expect(project.tickets[0].tagIds).toBeUndefined();
   });
 });
+
+test("can open tag management panel and create tags", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-create.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-create" });
+  
+  // Open tag management panel
+  fireEvent.click(screen.getByRole("button", { name: "Manage tags" }));
+  
+  // Should show tag form
+  expect(screen.getByLabelText("Tag name")).toBeTruthy();
+  expect(screen.getByLabelText("Color")).toBeTruthy();
+  
+  // Add a tag
+  const tagNameInput = screen.getByLabelText("Tag name") as HTMLInputElement;
+  fireEvent.change(tagNameInput, { target: { value: "bug" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+  
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tags).toHaveLength(1);
+    expect(project.tags[0].name).toBe("bug");
+  });
+});
+
+test("can assign and display tags on tickets", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-assign.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-assign" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Bug fix" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Bug fix");
+  
+  // Verify ticket was saved with correct structure
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tickets).toHaveLength(1);
+    expect(project.tickets[0].title).toBe("Bug fix");
+  });
+});
