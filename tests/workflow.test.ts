@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from "@testing-library/dom";
+import userEvent from "@testing-library/user-event";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -998,4 +999,233 @@ test("can change tag color via tag management", async () => {
   const tagColorInput = screen.getByLabelText("Color") as HTMLInputElement;
   expect(tagColorInput).toBeTruthy();
   expect(tagColorInput.value).toBe("#3b82f6");
+});
+
+test("can create and rename project members", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "members.littlekanban");
+  const desktop = desktopFor(path);
+  const user = userEvent.setup();
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "members" });
+
+  // Add a ticket
+  await user.type(screen.getByLabelText("Ticket title"), "Design UI");
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Design UI");
+  await screen.findByText("Saved");
+
+  // Open manage members
+  fireEvent.click(screen.getByRole("button", { name: "Manage members" }));
+
+  // Add a member
+  await user.type(screen.getByLabelText("Member name"), "Alice");
+  await user.click(screen.getByRole("button", { name: "Add member" }));
+  
+  // Wait for member to appear in the list
+  await waitFor(async () => {
+    expect(screen.getByText("Alice")).toBeTruthy();
+  });
+  
+  // Wait for save confirmation
+  await screen.findByText("Saved");
+
+  // Rename the member
+  fireEvent.click(screen.getByRole("button", { name: /rename Alice/i }));
+  fireEvent.change(screen.getByDisplayValue("Alice"), {
+    target: { value: "Alice Brown" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save rename" }));
+  
+  // Wait for rename to complete
+  await waitFor(async () => {
+    expect(screen.getByText("Alice Brown")).toBeTruthy();
+  });
+  
+  await screen.findByText("Saved");
+});
+
+test("can assign a single member to a ticket", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "assign.littlekanban");
+  const desktop = desktopFor(path);
+  const user = userEvent.setup();
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "assign" });
+
+  // Add a ticket
+  await user.type(screen.getByLabelText("Ticket title"), "Review PR");
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Review PR");
+  await screen.findByText("Saved");
+
+  // Add a member
+  fireEvent.click(screen.getByRole("button", { name: "Manage members" }));
+  await user.type(screen.getByLabelText("Member name"), "Bob");
+  await user.click(screen.getByRole("button", { name: "Add member" }));
+  
+  await waitFor(async () => {
+    expect(screen.getByText("Bob")).toBeTruthy();
+  });
+  
+  await screen.findByText("Saved");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+  // Assign member to ticket
+  fireEvent.click(screen.getByRole("button", { name: /assign member.*Review PR/i }));
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "assign Bob" })).toBeTruthy();
+  });
+  await user.click(screen.getByRole("button", { name: "assign Bob" }));
+  await screen.findByText("Saved");
+
+  // Verify member is shown on ticket (look for ticket container to avoid duplicate "Bob" text)
+  const ticketItem = screen.getByRole("button", { name: /move.*Review PR.*In progress/i }).closest("li");
+  expect(ticketItem?.textContent).toContain("Bob");
+});
+
+test("can unassign a member from a ticket", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "unassign.littlekanban");
+  const desktop = desktopFor(path);
+  const user = userEvent.setup();
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "unassign" });
+
+  // Add a ticket
+  await user.type(screen.getByLabelText("Ticket title"), "Task 1");
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Task 1");
+  await screen.findByText("Saved");
+
+  // Add a member and assign
+  fireEvent.click(screen.getByRole("button", { name: "Manage members" }));
+  await user.type(screen.getByLabelText("Member name"), "Carol");
+  await user.click(screen.getByRole("button", { name: "Add member" }));
+  
+  await waitFor(async () => {
+    expect(screen.getByText("Carol")).toBeTruthy();
+  });
+  
+  await screen.findByText("Saved");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+  fireEvent.click(screen.getByRole("button", { name: /assign member.*Task 1/i }));
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "assign Carol" })).toBeTruthy();
+  });
+  await user.click(screen.getByRole("button", { name: "assign Carol" }));
+  await screen.findByText("Saved");
+
+  // Unassign the member
+  await user.click(screen.getByRole("button", { name: /unassign/i }));
+  await screen.findByText("Saved");
+  
+  // Verify member is unassigned (check that the styled member display is gone)
+  await waitFor(() => {
+    const memberDisplays = document.querySelectorAll("span[style*='background-color: rgb(224, 231, 255)']");
+    expect(memberDisplays).toHaveLength(0);
+  });
+});
+
+test("member persistence and display on reopening", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "persist.littlekanban");
+  const desktop = desktopFor(path);
+  const user = userEvent.setup();
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "persist" });
+
+  // Add a ticket
+  await user.type(screen.getByLabelText("Ticket title"), "Important task");
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Important task");
+  await screen.findByText("Saved");
+
+  // Add a member and assign
+  fireEvent.click(screen.getByRole("button", { name: "Manage members" }));
+  await user.type(screen.getByLabelText("Member name"), "Dave");
+  await user.click(screen.getByRole("button", { name: "Add member" }));
+  
+  await waitFor(async () => {
+    expect(screen.getByText("Dave")).toBeTruthy();
+  });
+  
+  await screen.findByText("Saved");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+  fireEvent.click(screen.getByRole("button", { name: /assign member.*Important task/i }));
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "assign Dave" })).toBeTruthy();
+  });
+  await user.click(screen.getByRole("button", { name: "assign Dave" }));
+  await screen.findByText("Saved");
+
+  // Verify persistence in file
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.members).toBeDefined();
+    expect(project.members).toHaveLength(1);
+    expect(project.members[0]).toHaveProperty("name", "Dave");
+    expect(project.tickets[0]).toHaveProperty("memberId");
+  });
+
+  // Close and reopen
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByText("Important task");
+  await screen.findByText("Dave");
+});
+
+test("removing a member without assignments", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "remove.littlekanban");
+  const desktop = desktopFor(path);
+  const user = userEvent.setup();
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "remove" });
+
+  await user.type(screen.getByLabelText("Ticket title"), "Task");
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Task");
+  await screen.findByText("Saved");
+
+  // Add a member without assigning
+  fireEvent.click(screen.getByRole("button", { name: "Manage members" }));
+  await user.type(screen.getByLabelText("Member name"), "Eve");
+  await user.click(screen.getByRole("button", { name: "Add member" }));
+  
+  // First, verify the member is saved to the file
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const projectData = JSON.parse(json);
+    expect(projectData.members).toHaveLength(1);
+    expect(projectData.members[0].name).toBe("Eve");
+  });
+  
+  // Then, verify the member appears in the DOM
+  await waitFor(async () => {
+    expect(screen.getByText("Eve")).toBeTruthy();
+  });
+  
+  await screen.findByText("Saved");
+
+  // Remove the member
+  fireEvent.click(screen.getByRole("button", { name: /delete Eve/i }));
+  await waitFor(() => {
+    expect(screen.queryByText("Eve")).toBe(null);
+  });
+  await screen.findByText("Saved");
 });
