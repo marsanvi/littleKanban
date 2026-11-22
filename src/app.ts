@@ -339,6 +339,37 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
         }
       }));
       
+      item.appendChild(createButton("Change color", `change color of ${tag.name}`, () => {
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = tag.color || "#3b82f6";
+        const container = document.createElement("div");
+        container.style.padding = "1em";
+        container.style.border = "1px solid #ccc";
+        container.style.borderRadius = "0.25em";
+        const label = document.createElement("label");
+        label.textContent = "Select new color: ";
+        label.style.marginRight = "0.5em";
+        const confirmBtn = document.createElement("button");
+        confirmBtn.type = "button";
+        confirmBtn.textContent = "Apply";
+        confirmBtn.style.marginLeft = "0.5em";
+        confirmBtn.onclick = () => {
+          void changeTagColor(tag.id, colorInput.value);
+          container.remove();
+        };
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.style.marginLeft = "0.25em";
+        cancelBtn.onclick = () => container.remove();
+        container.appendChild(label);
+        container.appendChild(colorInput);
+        container.appendChild(confirmBtn);
+        container.appendChild(cancelBtn);
+        item.parentNode?.insertBefore(container, item.nextSibling);
+      }));
+      
       item.appendChild(createButton("Delete", `delete ${tag.name}`, () => void deleteTag(tag.id)));
       
       return item;

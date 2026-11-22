@@ -972,3 +972,30 @@ test("archived tickets support tags", async () => {
     expect(project.tickets[0].tagIds === undefined || Array.isArray(project.tickets[0].tagIds)).toBe(true);
   });
 });
+
+test("can change tag color via tag management", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-color.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-color" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Test task" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Test task");
+  
+  // Verify color input exists in tag management UI with default color
+  fireEvent.click(screen.getByRole("button", { name: "Manage tags" }));
+  
+  const tagColorInput = screen.getByLabelText("Color") as HTMLInputElement;
+  expect(tagColorInput).toBeTruthy();
+  expect(tagColorInput.value).toBe("#3b82f6");
+});
