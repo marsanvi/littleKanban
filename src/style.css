@@ -19,4 +19,11 @@ input { min-width: 12rem; }
 .columns section { background: white; border-radius: .5rem; padding: 1rem; min-height: 12rem; }
 ul { list-style: none; padding: 0; }
 li { background: #edf2fb; border-radius: .25rem; padding: .75rem; margin: .5rem 0; overflow-wrap: anywhere; }
+.calendar-weekdays, .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .35rem; }
+.calendar-weekdays { margin-top: 1rem; text-align: center; font-weight: 600; }
+.calendar-grid { margin-top: .35rem; }
+.calendar-grid li { min-height: 7rem; margin: 0; padding: .5rem; }
+.calendar-grid li.calendar-empty { background: transparent; }
+.calendar-grid time { display: block; font-weight: 600; }
+.calendar-grid button { display: block; width: 100%; margin-top: .35rem; padding: .35rem; text-align: left; overflow-wrap: anywhere; }
 @media (max-width: 650px) { .columns { grid-template-columns: 1fr; } }

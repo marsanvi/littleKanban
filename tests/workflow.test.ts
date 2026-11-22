@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor } from "@testing-library/dom";
+import { fireEvent, screen, waitFor, within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1228,4 +1228,87 @@ test("removing a member without assignments", async () => {
     expect(screen.queryByText("Eve")).toBe(null);
   });
   await screen.findByText("Saved");
+});
+
+test("saves a date-only due date and restores it when reopening the ticket", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "due-date.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "due-date" });
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Renew passport" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Renew passport");
+  await screen.findByText("Saved");
+
+  fireEvent.click(screen.getByRole("button", { name: /edit Renew passport/i }));
+  const dueDate = screen.getByLabelText("Due date") as HTMLInputElement;
+  const saveButton = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+  await waitFor(() => expect(saveButton.disabled).toBe(false));
+  expect(dueDate.type).toBe("date");
+  fireEvent.input(dueDate, { target: { value: "2026-03-31" } });
+  fireEvent.click(saveButton);
+  await waitFor(async () => {
+    const savedProject = JSON.parse(await readFile(path, "utf8")) as Project;
+    expect(savedProject.tickets[0].dueDate).toBe("2026-03-31");
+  });
+
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByRole("heading", { name: "due-date" });
+  fireEvent.click(screen.getByRole("button", { name: /edit Renew passport/i }));
+  expect((screen.getByLabelText("Due date") as HTMLInputElement).value).toBe("2026-03-31");
+});
+
+test("calendar shows due tickets on their dates and navigates months", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "calendar.littlekanban");
+  const today = new Date();
+  const currentDate = new Date(today.getFullYear(), today.getMonth(), 15);
+  const nextDate = new Date(today.getFullYear(), today.getMonth() + 1, 15);
+  const dateOnly = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const currentDueDate = dateOnly(currentDate);
+  const nextDueDate = dateOnly(nextDate);
+  const project: Project = {
+    version: 1,
+    name: "calendar",
+    tags: [],
+    members: [],
+    tickets: [
+      { id: "current", title: "Current month task", status: "todo", order: 0, dueDate: currentDueDate },
+      { id: "done", title: "Completed task", status: "done", order: 0, dueDate: currentDueDate },
+      { id: "archived", title: "Archived task", status: "todo", order: 1, dueDate: currentDueDate, archived: true },
+      { id: "undated", title: "Undated task", status: "todo", order: 2 },
+      { id: "next", title: "Next month task", status: "in-progress", order: 0, dueDate: nextDueDate },
+    ],
+  };
+  await writeFile(path, JSON.stringify(project));
+
+  startApp(document.body, desktopFor(path));
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByRole("heading", { name: "calendar" });
+  expect(screen.getByText("Undated task")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View calendar" }));
+  const calendar = within(document.getElementById("calendar-panel") as HTMLElement);
+
+  const currentTask = calendar.getByRole("button", { name: /edit Current month task/i });
+  const currentDay = currentTask.closest("li");
+  expect(currentDay?.querySelector("time")?.getAttribute("datetime")).toBe(currentDueDate);
+  expect(calendar.getByRole("button", { name: /edit Completed task/i })).toBeTruthy();
+  expect(calendar.queryByRole("button", { name: /edit Archived task/i })).toBeNull();
+  expect(calendar.queryByRole("button", { name: /edit Undated task/i })).toBeNull();
+  expect(calendar.queryByRole("button", { name: /edit Next month task/i })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+  const nextTask = calendar.getByRole("button", { name: /edit Next month task/i });
+  expect(nextTask.closest("li")?.querySelector("time")?.getAttribute("datetime")).toBe(nextDueDate);
+  expect(calendar.queryByRole("button", { name: /edit Current month task/i })).toBeNull();
+
+  fireEvent.click(nextTask);
+  expect(screen.getByRole("heading", { name: "Edit Ticket" })).toBeTruthy();
+  expect((screen.getByLabelText("Due date") as HTMLInputElement).value).toBe(nextDueDate);
 });

@@ -16,7 +16,7 @@ with you and back up.
 - **Markdown-first tickets:** store as much of each ticket as possible as
   Markdown, so descriptions, checklists, and notes remain easy to read and edit.
 - **Tags and calendar:** categorize tickets with project-specific tags and see
-  their due dates in a monthly calendar for one or multiple projects.
+  their due dates in a monthly calendar for one project at a time.
 - **Small, portable storage:** use a compact data store for each project.
   A relational database is one possibility, but the format is not yet decided.
 
@@ -29,9 +29,11 @@ project would have its own file and could be shared with the people involved.
 
 ## Early desktop prototype
 
-The desktop application can create a project, add title-only tickets, and reopen
-the same file. Choose any local folder, including a sync folder, using the native
-file dialog. Tickets are saved automatically; errors leave them visible for retry.
+The desktop application can create a project, manage tickets, set optional
+date-only due dates, and reopen the same file. Its monthly calendar shows
+non-archived due-dated tickets, including completed tickets. Choose any local
+folder, including a sync folder, using the native file dialog. Tickets are saved
+automatically; errors leave them visible for retry.
 
 The JSON project format is **provisional**. Concurrent editing and sync conflict
 recovery are not yet safe or implemented. Do not rely on this prototype for
