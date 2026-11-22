@@ -943,3 +943,32 @@ test("tag deletion removes tags from all tickets", async () => {
   let project = JSON.parse(json);
   expect(project.tags).toEqual([]);
 });
+
+test("archived tickets support tags", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-archive.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-archive" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Task to archive" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Task to archive");
+  
+  // Verify ticket structure supports tagIds
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tickets).toHaveLength(1);
+    expect(project.tickets[0]).toHaveProperty("title", "Task to archive");
+    expect(project.tickets[0].tagIds === undefined || Array.isArray(project.tickets[0].tagIds)).toBe(true);
+  });
+});

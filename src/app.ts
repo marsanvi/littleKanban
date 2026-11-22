@@ -271,6 +271,36 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       titleSpan.textContent = ticket.title;
       item.appendChild(titleSpan);
       
+      // Display assigned tags on archived tickets too
+      if (ticket.tagIds && ticket.tagIds.length > 0 && project) {
+        const tagsDiv = document.createElement("div");
+        tagsDiv.style.marginTop = "0.5em";
+        tagsDiv.style.display = "flex";
+        tagsDiv.style.gap = "0.5em";
+        tagsDiv.style.flexWrap = "wrap";
+        
+        ticket.tagIds.forEach((tagId) => {
+          const tag = project!.tags.find((t) => t.id === tagId);
+          if (tag) {
+            const tagSpan = document.createElement("span");
+            tagSpan.textContent = tag.name;
+            tagSpan.style.padding = "0.25em 0.5em";
+            tagSpan.style.borderRadius = "0.25em";
+            tagSpan.style.fontSize = "0.9em";
+            if (tag.color) {
+              tagSpan.style.backgroundColor = tag.color;
+              tagSpan.style.color = "white";
+            } else {
+              tagSpan.style.backgroundColor = "#e5e7eb";
+              tagSpan.style.color = "#1f2937";
+            }
+            tagsDiv.appendChild(tagSpan);
+          }
+        });
+        
+        item.appendChild(tagsDiv);
+      }
+      
       item.appendChild(createButton("Restore", `restore ${ticket.title}`, () => void restoreTicket(ticket.id)));
       item.appendChild(createButton("Delete", `permanently delete ${ticket.title}`, () => void deleteTicket(ticket.id)));
       
