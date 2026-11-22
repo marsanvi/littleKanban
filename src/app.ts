@@ -208,6 +208,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   let assigningTicketId: string | null = null;
   const currentDate = new Date();
   let calendarMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+  let creatingDate: string | null = null;
 
   function showError(error: unknown): void {
     message.textContent = error instanceof Error ? error.message : String(error);
@@ -221,6 +222,37 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     btn.setAttribute("aria-label", ariaLabel);
     btn.addEventListener("click", onClick);
     return btn;
+  }
+
+  async function addTicket(titleValue: string, dueDate?: string): Promise<void> {
+    if (!project || busy) return;
+    const ticketTitle = titleValue.trim();
+    if (!ticketTitle) return;
+    const todoTickets = project.tickets.filter((ticket) => ticket.status === "todo" && !ticket.archived);
+    const ticketId = crypto.randomUUID();
+    project.tickets.push({
+      id: ticketId,
+      title: ticketTitle,
+      body: "",
+      ...(dueDate ? { dueDate } : {}),
+      status: "todo",
+      order: todoTickets.length,
+    });
+    creatingDate = null;
+    dirty = true;
+    render();
+    await save();
+    if (dueDate) calendarDays.querySelector<HTMLButtonElement>(`button[data-ticket-id="${ticketId}"]`)?.focus();
+  }
+
+  async function updateTicketDueDate(ticketId: string, dueDate: string): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((item) => item.id === ticketId);
+    if (!ticket || ticket.archived || ticket.dueDate === dueDate) return;
+    ticket.dueDate = dueDate;
+    dirty = true;
+    render();
+    await save();
   }
 
   function renderCalendar(): void {
@@ -246,12 +278,73 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       time.dateTime = dueDate;
       time.textContent = String(day);
       cell.appendChild(time);
+      cell.addEventListener("dragover", (event) => {
+        if (!event.dataTransfer) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        cell.classList.add("calendar-drop-target");
+      });
+      cell.addEventListener("drop", (event) => {
+        event.preventDefault();
+        cell.classList.remove("calendar-drop-target");
+        const ticketId = event.dataTransfer?.getData("text/plain");
+        if (ticketId) void updateTicketDueDate(ticketId, dueDate);
+      });
+
+      if (creatingDate === dueDate) {
+        const form = document.createElement("form");
+        const label = document.createElement("label");
+        const ticketTitle = document.createElement("input");
+        const addButton = document.createElement("button");
+        const cancelButton = document.createElement("button");
+        ticketTitle.id = `calendar-title-${dueDate}`;
+        ticketTitle.required = true;
+        ticketTitle.maxLength = 500;
+        ticketTitle.autocomplete = "off";
+        label.htmlFor = ticketTitle.id;
+        label.textContent = `Ticket title for ${dueDate}`;
+        addButton.type = "submit";
+        addButton.textContent = "Add ticket";
+        addButton.disabled = busy;
+        cancelButton.type = "button";
+        cancelButton.textContent = "Cancel";
+        cancelButton.addEventListener("click", () => {
+          creatingDate = null;
+          renderCalendar();
+          calendarDays.querySelector<HTMLButtonElement>(`button[aria-label="Add ticket for ${dueDate}"]`)?.focus();
+        });
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          void addTicket(ticketTitle.value, dueDate);
+        });
+        form.append(label, ticketTitle, addButton, cancelButton);
+        cell.appendChild(form);
+      } else {
+        cell.appendChild(createButton("Add ticket", `Add ticket for ${dueDate}`, () => {
+          creatingDate = dueDate;
+          renderCalendar();
+          calendarDays.querySelector<HTMLInputElement>(`#calendar-title-${dueDate}`)?.focus();
+        }));
+      }
 
       const dueTickets = project.tickets
         .filter((ticket) => !ticket.archived && ticket.dueDate === dueDate)
         .sort((a, b) => a.order - b.order);
       dueTickets.forEach((ticket) => {
-        cell.appendChild(createButton(ticket.title, `edit ${ticket.title}`, () => openEditPanel(ticket)));
+        const ticketButton = createButton(ticket.title, `edit ${ticket.title}`, () => openEditPanel(ticket));
+        ticketButton.dataset.ticketId = ticket.id;
+        ticketButton.draggable = true;
+        ticketButton.addEventListener("dragstart", (event) => {
+          if (!event.dataTransfer) return;
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", ticket.id);
+        });
+        ticketButton.addEventListener("dragend", () => {
+          calendarDays.querySelectorAll(".calendar-drop-target").forEach((target) => {
+            target.classList.remove("calendar-drop-target");
+          });
+        });
+        cell.appendChild(ticketButton);
       });
       cells.push(cell);
     }
@@ -289,6 +382,12 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
         const titleSpan = document.createElement("span");
         titleSpan.textContent = ticket.title;
         item.appendChild(titleSpan);
+        if (ticket.dueDate) {
+          const dueDate = document.createElement("time");
+          dueDate.dateTime = ticket.dueDate;
+          dueDate.textContent = `Due ${ticket.dueDate}`;
+          item.appendChild(dueDate);
+        }
         
         if (ticket.body) {
           const bodyDiv = document.createElement("div");
@@ -472,7 +571,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       
       return item;
     }));
-    renderCalendar();
+    if (!calendarPanel.hidden) renderCalendar();
     } catch (e) {
       // Ignore errors from rendering if DOM is disconnected
       if (!(e instanceof Error) || !e.message.includes("Missing element")) throw e;
@@ -798,6 +897,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   async function save(): Promise<void> {
     if (!project || busy) return;
     busy = true;
+    message.textContent = "Saving";
     try {
       render();
     } catch (error) {
@@ -859,14 +959,9 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   element("#open").addEventListener("click", () => void select(false));
   element<HTMLFormElement>("#ticket-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    const value = title.value.trim();
-    if (!project || busy || !value) return;
-    const todoTickets = project.tickets.filter((t) => t.status === "todo");
-    project.tickets.push({ id: crypto.randomUUID(), title: value, body: "", status: "todo", order: todoTickets.length });
+    if (!project || busy || !title.value.trim()) return;
+    void addTicket(title.value);
     title.value = "";
-    dirty = true;
-    render();
-    void save();
   });
   
   saveEditBtn.addEventListener("click", () => {
@@ -926,15 +1021,18 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
 
   previousMonthBtn.addEventListener("click", () => {
     calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
+    creatingDate = null;
     renderCalendar();
   });
 
   nextMonthBtn.addEventListener("click", () => {
     calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+    creatingDate = null;
     renderCalendar();
   });
 
   closeCalendarBtn.addEventListener("click", () => {
+    creatingDate = null;
     calendarPanel.hidden = true;
   });
 

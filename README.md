@@ -31,9 +31,10 @@ project would have its own file and could be shared with the people involved.
 
 The desktop application can create a project, manage tickets, set optional
 date-only due dates, and reopen the same file. Its monthly calendar shows
-non-archived due-dated tickets, including completed tickets. Choose any local
-folder, including a sync folder, using the native file dialog. Tickets are saved
-automatically; errors leave them visible for retry.
+non-archived due-dated tickets, including completed tickets. Tickets can be
+created from a calendar day and rescheduled by dragging or editing their due
+date. Choose any local folder, including a sync folder, using the native file
+dialog. Tickets are saved automatically; errors leave them visible for retry.
 
 The JSON project format is **provisional**. Concurrent editing and sync conflict
 recovery are not yet safe or implemented. Do not rely on this prototype for
