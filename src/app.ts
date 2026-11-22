@@ -5,7 +5,7 @@ export interface Project {
   name: string;
   tags: { id: string; name: string; color?: string }[];
   members: { id: string; name: string }[];
-  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number; archived?: boolean; tagIds?: string[]; memberId?: string }[];
+  tickets: { id: string; title: string; body?: string; dueDate?: string; status: "todo" | "in-progress" | "done"; order: number; archived?: boolean; tagIds?: string[]; memberId?: string }[];
 }
 
 export interface Desktop {
@@ -37,9 +37,22 @@ function isProject(value: unknown): value is Project {
       ["todo", "in-progress", "done"].includes((ticket as Record<string, unknown>).status as string) &&
       typeof (ticket as Record<string, unknown>).order === "number" &&
       ((ticket as Record<string, unknown>).body === undefined || typeof (ticket as Record<string, unknown>).body === "string") &&
+      ((ticket as Record<string, unknown>).dueDate === undefined || (typeof (ticket as Record<string, unknown>).dueDate === "string" && isCalendarDate((ticket as Record<string, unknown>).dueDate as string))) &&
       ((ticket as Record<string, unknown>).archived === undefined || typeof (ticket as Record<string, unknown>).archived === "boolean") &&
       ((ticket as Record<string, unknown>).tagIds === undefined || (Array.isArray((ticket as Record<string, unknown>).tagIds) && ((ticket as Record<string, unknown>).tagIds as unknown[]).every((id: unknown) => typeof id === "string"))) &&
       ((ticket as Record<string, unknown>).memberId === undefined || typeof (ticket as Record<string, unknown>).memberId === "string"));
+}
+
+function isCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= daysInMonth[month - 1];
 }
 
 export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChanges(): boolean } {
@@ -104,6 +117,8 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           <input id="edit-title" required maxlength="500" autocomplete="off">
           <label for="edit-body">Ticket body</label>
           <textarea id="edit-body" placeholder="Markdown-formatted content..."></textarea>
+          <label for="edit-due-date">Due date</label>
+          <input id="edit-due-date" type="date">
           <button type="button" id="save-edit">Save</button>
           <button type="button" id="export-edit">Export to file</button>
           <button type="button" id="import-edit">Import from file</button>
@@ -120,11 +135,24 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           <section><h3>Done</h3><ul id="done-tickets"></ul></section>
         </div>
         <button type="button" id="view-archive">View archived</button>
+        <button type="button" id="view-calendar">View calendar</button>
         <div id="archive-panel" hidden>
           <h3>Archived Tickets</h3>
           <ul id="archived-tickets"></ul>
           <button type="button" id="close-archive">Close</button>
         </div>
+      </section>
+      <section id="calendar-panel" aria-label="Calendar" hidden>
+        <h3 id="calendar-month"></h3>
+        <nav aria-label="Calendar month">
+          <button type="button" id="previous-month">Previous month</button>
+          <button type="button" id="next-month">Next month</button>
+        </nav>
+        <div class="calendar-weekdays" aria-hidden="true">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <ol id="calendar-days" class="calendar-grid"></ol>
+        <button type="button" id="close-calendar">Close calendar</button>
       </section>
     </main>`;
 
@@ -160,6 +188,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   const editPanel = element("#edit-panel");
   const editTitle = element<HTMLInputElement>("#edit-title");
   const editBody = element<HTMLTextAreaElement>("#edit-body");
+  const editDueDate = element<HTMLInputElement>("#edit-due-date");
   const saveEditBtn = element<HTMLButtonElement>("#save-edit");
   const exportEditBtn = element<HTMLButtonElement>("#export-edit");
   const importEditBtn = element<HTMLButtonElement>("#import-edit");
@@ -167,10 +196,18 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   const viewArchiveBtn = element<HTMLButtonElement>("#view-archive");
   const archivePanel = element("#archive-panel");
   const closeArchiveBtn = element<HTMLButtonElement>("#close-archive");
-  const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>("button"));
+  const viewCalendarBtn = element<HTMLButtonElement>("#view-calendar");
+  const calendarPanel = element("#calendar-panel");
+  const calendarMonthHeading = element("#calendar-month");
+  const calendarDays = element<HTMLOListElement>("#calendar-days");
+  const previousMonthBtn = element<HTMLButtonElement>("#previous-month");
+  const nextMonthBtn = element<HTMLButtonElement>("#next-month");
+  const closeCalendarBtn = element<HTMLButtonElement>("#close-calendar");
 
   let renamingMemberId: string | null = null;
   let assigningTicketId: string | null = null;
+  const currentDate = new Date();
+  let calendarMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
 
   function showError(error: unknown): void {
     message.textContent = error instanceof Error ? error.message : String(error);
@@ -179,17 +216,54 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   function createButton(text: string, ariaLabel: string, onClick: () => void): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.disabled = busy;
     btn.textContent = text;
     btn.setAttribute("aria-label", ariaLabel);
     btn.addEventListener("click", onClick);
     return btn;
   }
 
+  function renderCalendar(): void {
+    if (!project) return;
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    calendarMonthHeading.textContent = calendarMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells: HTMLLIElement[] = [];
+
+    for (let index = 0; index < firstWeekday; index++) {
+      const emptyDay = document.createElement("li");
+      emptyDay.className = "calendar-empty";
+      emptyDay.setAttribute("aria-hidden", "true");
+      cells.push(emptyDay);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dueDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const cell = document.createElement("li");
+      const time = document.createElement("time");
+      time.dateTime = dueDate;
+      time.textContent = String(day);
+      cell.appendChild(time);
+
+      const dueTickets = project.tickets
+        .filter((ticket) => !ticket.archived && ticket.dueDate === dueDate)
+        .sort((a, b) => a.order - b.order);
+      dueTickets.forEach((ticket) => {
+        cell.appendChild(createButton(ticket.title, `edit ${ticket.title}`, () => openEditPanel(ticket)));
+      });
+      cells.push(cell);
+    }
+
+    calendarDays.replaceChildren(...cells);
+  }
+
   function render(): void {
     try {
       if (!root.isConnected) return; // DOM has been disconnected
       board.hidden = project === null;
-      buttons.forEach((button) => { 
+      root.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
         if (button.type !== "submit") button.disabled = busy;
       });
       retry.hidden = !dirty;
@@ -398,16 +472,18 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       
       return item;
     }));
+    renderCalendar();
     } catch (e) {
       // Ignore errors from rendering if DOM is disconnected
       if (!(e instanceof Error) || !e.message.includes("Missing element")) throw e;
     }
   }
 
-  function openEditPanel(ticket: { id: string; title: string; body?: string }): void {
+  function openEditPanel(ticket: { id: string; title: string; body?: string; dueDate?: string }): void {
     editingTicketId = ticket.id;
     editTitle.value = ticket.title;
     editBody.value = ticket.body || "";
+    editDueDate.value = ticket.dueDate || "";
     editPanel.hidden = false;
   }
 
@@ -552,12 +628,13 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     await save();
   }
 
-  async function updateAndSaveTicket(ticketId: string, title: string, body: string): Promise<void> {
+  async function updateAndSaveTicket(ticketId: string, title: string, body: string, dueDate: string): Promise<void> {
     if (!project) return;
     const ticket = project.tickets.find((t) => t.id === ticketId);
     if (!ticket) return;
     ticket.title = title;
     ticket.body = body;
+    ticket.dueDate = dueDate || undefined;
     dirty = true;
     closeEditPanel();
     render();
@@ -794,7 +871,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   
   saveEditBtn.addEventListener("click", () => {
     if (!project || busy || !editingTicketId) return;
-    void updateAndSaveTicket(editingTicketId, editTitle.value.trim(), editBody.value);
+    void updateAndSaveTicket(editingTicketId, editTitle.value.trim(), editBody.value, editDueDate.value);
   });
   
   cancelEditBtn.addEventListener("click", () => {
@@ -840,6 +917,25 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   
   closeArchiveBtn.addEventListener("click", () => {
     archivePanel.hidden = true;
+  });
+
+  viewCalendarBtn.addEventListener("click", () => {
+    calendarPanel.hidden = false;
+    renderCalendar();
+  });
+
+  previousMonthBtn.addEventListener("click", () => {
+    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
+    renderCalendar();
+  });
+
+  nextMonthBtn.addEventListener("click", () => {
+    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+    renderCalendar();
+  });
+
+  closeCalendarBtn.addEventListener("click", () => {
+    calendarPanel.hidden = true;
   });
 
   manageTags.addEventListener("click", () => {
