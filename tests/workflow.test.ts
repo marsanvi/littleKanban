@@ -572,3 +572,203 @@ test("edits a ticket's body and persists it after reopening", async () => {
   expect(screen.getByText("Passport")).toBeTruthy();
   expect(screen.getByText("Clothes")).toBeTruthy();
 });
+
+test("archives a ticket and it disappears from the board", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "archive-test.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "archive-test" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Test ticket" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Test ticket");
+  await screen.findByText("Saved");
+  // Wait longer for busy flag to be reset
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  // Find the ticket list item and its archive button
+  const todoList = document.querySelector("#todo-tickets") as HTMLElement;
+  const ticketItem = todoList?.querySelector("li") as HTMLElement;
+  const archiveBtn = Array.from(ticketItem?.querySelectorAll("button") || []).find(b => b.textContent === "Archive") as HTMLButtonElement;
+  
+  if (!archiveBtn) {
+    throw new Error("Could not find archive button on ticket!");
+  }
+  
+  fireEvent.click(archiveBtn);
+  
+  // Wait for the "Saved" message
+  await waitFor(() => {
+    expect(screen.queryByText("Saved")).toBeTruthy();
+  }, { timeout: 1000 });
+
+  // After archiving, ticket should not appear in todo column
+  const todoTickets = todoList?.querySelectorAll("li") || [];
+  expect(todoTickets.length).toBe(0);
+});
+
+test("archived ticket persists when project is reopened", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "archive-persist.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "archive-persist" });
+  
+  // Add and archive a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Archived task" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Archived task");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  const archiveButtons = Array.from(screen.getAllByRole("button")).filter(b => b.textContent === "Archive");
+  fireEvent.click(archiveButtons[0]);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  // Verify JSON has archived flag
+  const json = await readFile(path, "utf8");
+  expect(json).toContain('"archived":true');
+
+  // Reopen project
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByRole("heading", { name: "archive-persist" });
+
+  // Check JSON to see if archived flag is preserved
+  const reopenedJson = await readFile(path, "utf8");
+  expect(reopenedJson).toContain('"archived":true');
+  
+  // Verify ticket is not visible in the board
+  const todoList = document.querySelector("#todo-tickets");
+  const todoItems = todoList?.querySelectorAll("li") || [];
+  expect(todoItems.length).toBe(0);
+});
+
+test("can restore an archived ticket from archive view", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "restore-test.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "restore-test" });
+  
+  // Add and archive a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Restorable task" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Restorable task");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
+  fireEvent.click(screen.getByRole("button", { name: /archive Restorable task/ }));
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Open archive view
+  fireEvent.click(screen.getByRole("button", { name: "View archived" }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Verify ticket appears in archive
+  expect(screen.getByText("Restorable task")).toBeTruthy();
+  
+  // Restore it
+  const restoreBtn = screen.getByRole("button", { name: /restore Restorable task/ });
+  fireEvent.click(restoreBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Close archive panel
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  
+  // Verify ticket is back on board
+  expect(screen.getByText("Restorable task")).toBeTruthy();
+});
+
+test("can permanently delete an archived ticket with confirmation", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "delete-test.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "delete-test" });
+  
+  // Add and archive a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Deletable task" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Deletable task");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
+  fireEvent.click(screen.getByRole("button", { name: /archive Deletable task/ }));
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Open archive view
+  fireEvent.click(screen.getByRole("button", { name: "View archived" }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Try to delete with confirmation
+  const deleteBtn = screen.getByRole("button", { name: /permanently delete Deletable task/ });
+  
+  // Mock confirm to return true
+  window.confirm = () => true;
+  fireEvent.click(deleteBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Verify JSON no longer contains the ticket
+  const json = await readFile(path, "utf8");
+  expect(json).not.toContain("Deletable task");
+});
+
+test("can cancel permanent deletion of archived ticket", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "cancel-delete-test.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "cancel-delete-test" });
+  
+  // Add and archive a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Cancelable task" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Cancelable task");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 200));
+  
+  fireEvent.click(screen.getByRole("button", { name: /archive Cancelable task/ }));
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  // Open archive view
+  fireEvent.click(screen.getByRole("button", { name: "View archived" }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Try to delete but cancel the confirmation
+  const deleteBtn = screen.getByRole("button", { name: /permanently delete Cancelable task/ });
+  
+  // Mock confirm to return false (user cancels)
+  window.confirm = () => false;
+  fireEvent.click(deleteBtn);
+  
+  // Don't wait for save since nothing should be saved after cancellation
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Verify ticket is still in archive
+  expect(screen.getByText("Cancelable task")).toBeTruthy();
+  
+  // Verify JSON still contains the ticket (archived)
+  const json = await readFile(path, "utf8");
+  expect(json).toContain("Cancelable task");
+  expect(json).toContain('"archived":true');
+});

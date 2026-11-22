@@ -3,7 +3,7 @@ import { renderMarkdown } from "./markdown";
 export interface Project {
   version: 1;
   name: string;
-  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number }[];
+  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number; archived?: boolean }[];
 }
 
 export interface Desktop {
@@ -25,7 +25,8 @@ function isProject(value: unknown): value is Project {
       typeof (ticket as Record<string, unknown>).title === "string" &&
       ["todo", "in-progress", "done"].includes((ticket as Record<string, unknown>).status as string) &&
       typeof (ticket as Record<string, unknown>).order === "number" &&
-      ((ticket as Record<string, unknown>).body === undefined || typeof (ticket as Record<string, unknown>).body === "string"));
+      ((ticket as Record<string, unknown>).body === undefined || typeof (ticket as Record<string, unknown>).body === "string") &&
+      ((ticket as Record<string, unknown>).archived === undefined || typeof (ticket as Record<string, unknown>).archived === "boolean"));
 }
 
 export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChanges(): boolean } {
@@ -70,6 +71,12 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           <section><h3>In progress</h3><ul id="in-progress-tickets"></ul></section>
           <section><h3>Done</h3><ul id="done-tickets"></ul></section>
         </div>
+        <button type="button" id="view-archive">View archived</button>
+        <div id="archive-panel" hidden>
+          <h3>Archived Tickets</h3>
+          <ul id="archived-tickets"></ul>
+          <button type="button" id="close-archive">Close</button>
+        </div>
       </section>
     </main>`;
 
@@ -89,6 +96,9 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   const exportEditBtn = element<HTMLButtonElement>("#export-edit");
   const importEditBtn = element<HTMLButtonElement>("#import-edit");
   const cancelEditBtn = element<HTMLButtonElement>("#cancel-edit");
+  const viewArchiveBtn = element<HTMLButtonElement>("#view-archive");
+  const archivePanel = element("#archive-panel");
+  const closeArchiveBtn = element<HTMLButtonElement>("#close-archive");
   const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>("button"));
 
   function showError(error: unknown): void {
@@ -122,7 +132,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       const status = statuses[i];
       const columnId = columnIds[i];
       const list = element(`#${columnId}`);
-      const ticketsInColumn = project.tickets.filter((t) => t.status === status).sort((a, b) => a.order - b.order);
+      const ticketsInColumn = project.tickets.filter((t) => t.status === status && !t.archived).sort((a, b) => a.order - b.order);
       
       list.replaceChildren(...ticketsInColumn.map((ticket, indexInColumn) => {
         const item = document.createElement("li");
@@ -157,9 +167,27 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           item.appendChild(createButton("Move down", `move ${ticket.title} down`, () => void moveDown(ticket.id, status)));
         }
         
+        // Add archive button
+        item.appendChild(createButton("Archive", `archive ${ticket.title}`, () => void archiveTicket(ticket.id)));
+        
         return item;
       }));
     }
+    
+    // Render archived tickets
+    const archivedList = element("#archived-tickets");
+    const archivedTickets = project.tickets.filter((t) => t.archived);
+    archivedList.replaceChildren(...archivedTickets.map((ticket) => {
+      const item = document.createElement("li");
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = ticket.title;
+      item.appendChild(titleSpan);
+      
+      item.appendChild(createButton("Restore", `restore ${ticket.title}`, () => void restoreTicket(ticket.id)));
+      item.appendChild(createButton("Delete", `permanently delete ${ticket.title}`, () => void deleteTicket(ticket.id)));
+      
+      return item;
+    }));
   }
 
   function openEditPanel(ticket: { id: string; title: string; body?: string }): void {
@@ -221,6 +249,35 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     ticket.body = body;
     dirty = true;
     closeEditPanel();
+    render();
+    await save();
+  }
+
+  async function archiveTicket(ticketId: string): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    ticket.archived = true;
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function restoreTicket(ticketId: string): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    ticket.archived = false;
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function deleteTicket(ticketId: string): Promise<void> {
+    if (!project || busy) return;
+    if (!confirm("Permanently delete this ticket? This cannot be undone.")) return;
+    project.tickets = project.tickets.filter((t) => t.id !== ticketId);
+    dirty = true;
     render();
     await save();
   }
@@ -329,6 +386,14 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       busy = false;
       render();
     }
+  });
+  
+  viewArchiveBtn.addEventListener("click", () => {
+    archivePanel.hidden = false;
+  });
+  
+  closeArchiveBtn.addEventListener("click", () => {
+    archivePanel.hidden = true;
   });
   
   retry.addEventListener("click", () => void save());
