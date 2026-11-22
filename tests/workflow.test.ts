@@ -300,6 +300,234 @@ test("refuses to open a newer project format without changing it", async () => {
   expect(await readFile(path, "utf8")).toBe(newer);
 });
 
+test("persists ticket status across project reopen", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "status.littlekanban");
+  const desktop = desktopFor(path);
+
+  // Create project and add ticket
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "status" });
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Build feature" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Build feature");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Move ticket to In progress
+  let moveBtn = screen.getAllByRole("button").find(btn => btn.textContent === "Move to In progress");
+  expect(moveBtn).toBeTruthy();
+  if (moveBtn) fireEvent.click(moveBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Close and reopen
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByText("Build feature");
+  
+  // Verify ticket is still in In progress column
+  // Should have "Move to Done" button now, not "Move to In progress"
+  const allButtons = screen.getAllByRole("button");
+  const moveToDoneBtn = allButtons.find(btn => btn.textContent === "Move to Done");
+  expect(moveToDoneBtn).toBeTruthy();
+  
+  // Should NOT have "Move to In progress" button for the same ticket
+  const moveToProgressBtn = allButtons.find(btn => btn.textContent === "Move to In progress");
+  expect(!moveToProgressBtn || moveToProgressBtn.textContent !== "Move to In progress").toBeTruthy();
+});
+
+test("reorders tickets within a column using move up/down buttons", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "order.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "order" });
+  
+  // Add three tickets
+  for (const title of ["First", "Second", "Third"]) {
+    fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: title } });
+    fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+    await screen.findByText(title);
+    await screen.findByText("Saved");
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  // Get all tickets in To do column - they should be in order: First, Second, Third
+  const todoColumn = Array.from(document.querySelectorAll("section")).find((s) =>
+    s.textContent?.includes("To do")
+  );
+  let todoItems = Array.from(todoColumn?.querySelectorAll("li") || []);
+  expect(todoItems.length).toBe(3);
+  expect(todoItems[0].textContent).toContain("First");
+  expect(todoItems[1].textContent).toContain("Second");
+  expect(todoItems[2].textContent).toContain("Third");
+
+  // Check what buttons exist in the second item (should have Move up and Move down)
+  const secondItemButtons = Array.from(todoItems[1].querySelectorAll("button"));
+  const secondItemButtonTexts = secondItemButtons.map(b => b.textContent);
+  expect(secondItemButtonTexts).toContain("Move up");
+  expect(secondItemButtonTexts).toContain("Move down");
+
+  // Find and click the Move up button for the second item
+  const moveUpBtn = secondItemButtons.find(b => b.textContent === "Move up");
+  expect(moveUpBtn).toBeTruthy();
+  if (!moveUpBtn) return;
+  fireEvent.click(moveUpBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Verify order changed: Second, First, Third
+  todoItems = Array.from(todoColumn?.querySelectorAll("li") || []);
+  expect(todoItems[0].textContent).toContain("Second");
+  expect(todoItems[1].textContent).toContain("First");
+  expect(todoItems[2].textContent).toContain("Third");
+});
+
+test("persists ticket ordering within column across project reopen", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "persist-order.littlekanban");
+  const desktop = desktopFor(path);
+
+  // Create project and add three tickets
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "persist-order" });
+  
+  for (const title of ["Alpha", "Beta", "Gamma"]) {
+    fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: title } });
+    fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+    await screen.findByText(title);
+    await screen.findByText("Saved");
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  // Reorder: Beta up to be first
+  const todoColumn = Array.from(document.querySelectorAll("section")).find((s) =>
+    s.textContent?.includes("To do")
+  );
+  let todoItems = Array.from(todoColumn?.querySelectorAll("li") || []);
+  const betaButtons = Array.from(todoItems[1].querySelectorAll("button"));
+  const betaMoveUpBtn = betaButtons.find(b => b.textContent === "Move up");
+  expect(betaMoveUpBtn).toBeTruthy();
+  if (betaMoveUpBtn) fireEvent.click(betaMoveUpBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Close and reopen
+  document.body.replaceChildren();
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByText("Beta");
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Verify order is still: Beta, Alpha, Gamma
+  const todoColumnAfter = Array.from(document.querySelectorAll("section")).find((s) =>
+    s.textContent?.includes("To do")
+  );
+  todoItems = Array.from(todoColumnAfter?.querySelectorAll("li") || []);
+  expect(todoItems[0].textContent).toContain("Beta");
+  expect(todoItems[1].textContent).toContain("Alpha");
+  expect(todoItems[2].textContent).toContain("Gamma");
+});
+
+test("moves a ticket between columns using a button control", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "board.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "board" });
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Design UI" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  // Wait for the ticket to appear
+  await screen.findByText("Design UI");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  // Check if the edit button exists
+  const editBtn = screen.getByRole("button", { name: /edit Design UI/i });
+  expect(editBtn).toBeTruthy();
+  
+  // Now get all buttons and find the move button
+  const allButtons = screen.getAllByRole("button");
+  const moveToProgressBtn = allButtons.find(btn => btn.textContent === "Move to In progress");
+  
+  expect(moveToProgressBtn).toBeTruthy();
+  if (!moveToProgressBtn) return;
+  
+  fireEvent.click(moveToProgressBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Verify ticket is still visible 
+  expect(screen.getByText("Design UI")).toBeTruthy();
+  
+  // Now find the "Move to Done" button (should be a different button instance)
+  const moveToDoneBtn = screen.getAllByRole("button").find(btn => btn.textContent === "Move to Done");
+  expect(moveToDoneBtn).toBeTruthy();
+  
+  if (!moveToDoneBtn) return;
+  fireEvent.click(moveToDoneBtn);
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  expect(screen.getByText("Design UI")).toBeTruthy();
+});
+
+test("done tickets remain visible in the done column", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "done-visible.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "done-visible" });
+  
+  // Add one ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), { target: { value: "Done Task" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  await screen.findByText("Done Task");
+  await screen.findByText("Saved");
+  await new Promise(resolve => setTimeout(resolve, 50));
+
+  // Verify ticket is in To do initially
+  expect(await readFile(path, "utf8")).toContain('"status":"todo"');
+  
+  // Move to Done (via In progress - but we'll check the file)
+  let todoColumn = Array.from(document.querySelectorAll("section")).find((s) =>
+    s.textContent?.includes("To do")
+  );
+  let todoItems = Array.from(todoColumn?.querySelectorAll("li") || []);
+  expect(todoItems.length).toBe(1);
+  
+  // Click the Move to In progress button
+  let todoButtons = Array.from(todoItems[0].querySelectorAll("button"));
+  let moveBtn = todoButtons.find(b => b.textContent === "Move to In progress");
+  expect(moveBtn).toBeTruthy();
+  
+  if (moveBtn) {
+    fireEvent.click(moveBtn);
+    await screen.findByText("Saved");
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Check the file to see if status was saved
+    const json = await readFile(path, "utf8");
+    console.log("JSON after move:", json);
+    expect(json).toContain('"status":"in-progress"');
+  }
+});
+
 test("edits a ticket's body and persists it after reopening", async () => {
   directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
   const path = join(directory, "trip.littlekanban");

@@ -3,7 +3,7 @@ import { renderMarkdown } from "./markdown";
 export interface Project {
   version: 1;
   name: string;
-  tickets: { id: string; title: string; body?: string; status: "todo" }[];
+  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number }[];
 }
 
 export interface Desktop {
@@ -23,7 +23,8 @@ function isProject(value: unknown): value is Project {
       !!ticket && typeof ticket === "object" &&
       typeof (ticket as Record<string, unknown>).id === "string" &&
       typeof (ticket as Record<string, unknown>).title === "string" &&
-      (ticket as Record<string, unknown>).status === "todo" &&
+      ["todo", "in-progress", "done"].includes((ticket as Record<string, unknown>).status as string) &&
+      typeof (ticket as Record<string, unknown>).order === "number" &&
       ((ticket as Record<string, unknown>).body === undefined || typeof (ticket as Record<string, unknown>).body === "string"));
 }
 
@@ -65,9 +66,9 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
           <button type="button" id="cancel-edit">Cancel</button>
         </div>
         <div class="columns">
-          <section><h3>To do</h3><ul id="tickets"></ul></section>
-          <section><h3>In progress</h3></section>
-          <section><h3>Done</h3></section>
+          <section><h3>To do</h3><ul id="todo-tickets"></ul></section>
+          <section><h3>In progress</h3><ul id="in-progress-tickets"></ul></section>
+          <section><h3>Done</h3><ul id="done-tickets"></ul></section>
         </div>
       </section>
     </main>`;
@@ -94,7 +95,17 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     message.textContent = error instanceof Error ? error.message : String(error);
   }
 
+  function createButton(text: string, ariaLabel: string, onClick: () => void): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = text;
+    btn.setAttribute("aria-label", ariaLabel);
+    btn.addEventListener("click", onClick);
+    return btn;
+  }
+
   function render(): void {
+    if (!root.isConnected) return; // DOM has been disconnected
     board.hidden = project === null;
     buttons.forEach((button) => { button.disabled = busy; });
     retry.hidden = !dirty;
@@ -102,28 +113,53 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     if (!project) return;
     element("#name").textContent = project.name;
     element("#path").textContent = path;
-    const list = element("#tickets");
-    list.replaceChildren(...project.tickets.map((ticket) => {
-      const item = document.createElement("li");
-      const titleSpan = document.createElement("span");
-      titleSpan.textContent = ticket.title;
-      item.appendChild(titleSpan);
+    
+    // Render tickets grouped by status
+    const statuses: Array<"todo" | "in-progress" | "done"> = ["todo", "in-progress", "done"];
+    const columnIds = ["todo-tickets", "in-progress-tickets", "done-tickets"];
+    
+    for (let i = 0; i < statuses.length; i++) {
+      const status = statuses[i];
+      const columnId = columnIds[i];
+      const list = element(`#${columnId}`);
+      const ticketsInColumn = project.tickets.filter((t) => t.status === status).sort((a, b) => a.order - b.order);
       
-      if (ticket.body) {
-        const bodyDiv = document.createElement("div");
-        bodyDiv.innerHTML = renderMarkdown(ticket.body);
-        item.appendChild(bodyDiv);
-      }
-      
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.textContent = "Edit";
-      editBtn.setAttribute("aria-label", `edit ${ticket.title}`);
-      editBtn.addEventListener("click", () => openEditPanel(ticket));
-      item.appendChild(editBtn);
-      
-      return item;
-    }));
+      list.replaceChildren(...ticketsInColumn.map((ticket, indexInColumn) => {
+        const item = document.createElement("li");
+        const titleSpan = document.createElement("span");
+        titleSpan.textContent = ticket.title;
+        item.appendChild(titleSpan);
+        
+        if (ticket.body) {
+          const bodyDiv = document.createElement("div");
+          bodyDiv.innerHTML = renderMarkdown(ticket.body);
+          item.appendChild(bodyDiv);
+        }
+        
+        item.appendChild(createButton(`Edit`, `edit ${ticket.title}`, () => openEditPanel(ticket)));
+        
+        // Add move buttons for status transitions
+        if (status === "todo") {
+          item.appendChild(createButton("Move to In progress", `move ${ticket.title} to In progress`, () => void moveTicket(ticket.id, "in-progress")));
+        } else if (status === "in-progress") {
+          item.appendChild(createButton("Move to Done", `move ${ticket.title} to Done`, () => void moveTicket(ticket.id, "done")));
+          item.appendChild(createButton("Move to To do", `move ${ticket.title} to To do`, () => void moveTicket(ticket.id, "todo")));
+        } else if (status === "done") {
+          item.appendChild(createButton("Move to In progress", `move ${ticket.title} to In progress`, () => void moveTicket(ticket.id, "in-progress")));
+        }
+
+        // Add move up/down buttons for ordering within column
+        if (indexInColumn > 0) {
+          item.appendChild(createButton("Move up", `move ${ticket.title} up`, () => void moveUp(ticket.id, status)));
+        }
+        
+        if (indexInColumn < ticketsInColumn.length - 1) {
+          item.appendChild(createButton("Move down", `move ${ticket.title} down`, () => void moveDown(ticket.id, status)));
+        }
+        
+        return item;
+      }));
+    }
   }
 
   function openEditPanel(ticket: { id: string; title: string; body?: string }): void {
@@ -136,6 +172,45 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   function closeEditPanel(): void {
     editingTicketId = null;
     editPanel.hidden = true;
+  }
+
+  async function moveTicket(ticketId: string, newStatus: "todo" | "in-progress" | "done"): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    ticket.status = newStatus;
+    // Set order to the end of the new status column
+    const ticketsInNewStatus = project.tickets.filter((t) => t.status === newStatus && t.id !== ticketId);
+    ticket.order = ticketsInNewStatus.length;
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function moveUp(ticketId: string, status: "todo" | "in-progress" | "done"): Promise<void> {
+    if (!project || busy) return;
+    const ticketsInStatus = project.tickets.filter((t) => t.status === status).sort((a, b) => a.order - b.order);
+    const index = ticketsInStatus.findIndex((t) => t.id === ticketId);
+    if (index <= 0) return; // Can't move first ticket up
+    const ticket = ticketsInStatus[index];
+    const prevTicket = ticketsInStatus[index - 1];
+    [ticket.order, prevTicket.order] = [prevTicket.order, ticket.order];
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function moveDown(ticketId: string, status: "todo" | "in-progress" | "done"): Promise<void> {
+    if (!project || busy) return;
+    const ticketsInStatus = project.tickets.filter((t) => t.status === status).sort((a, b) => a.order - b.order);
+    const index = ticketsInStatus.findIndex((t) => t.id === ticketId);
+    if (index >= ticketsInStatus.length - 1) return; // Can't move last ticket down
+    const ticket = ticketsInStatus[index];
+    const nextTicket = ticketsInStatus[index + 1];
+    [ticket.order, nextTicket.order] = [nextTicket.order, ticket.order];
+    dirty = true;
+    render();
+    await save();
   }
 
   async function updateAndSaveTicket(ticketId: string, title: string, body: string): Promise<void> {
@@ -206,7 +281,8 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     event.preventDefault();
     const value = title.value.trim();
     if (!project || busy || !value) return;
-    project.tickets.push({ id: crypto.randomUUID(), title: value, body: "", status: "todo" });
+    const todoTickets = project.tickets.filter((t) => t.status === "todo");
+    project.tickets.push({ id: crypto.randomUUID(), title: value, body: "", status: "todo", order: todoTickets.length });
     title.value = "";
     dirty = true;
     render();
