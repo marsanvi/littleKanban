@@ -3,7 +3,8 @@ import { renderMarkdown } from "./markdown";
 export interface Project {
   version: 1;
   name: string;
-  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number; archived?: boolean }[];
+  tags: { id: string; name: string; color?: string }[];
+  tickets: { id: string; title: string; body?: string; status: "todo" | "in-progress" | "done"; order: number; archived?: boolean; tagIds?: string[] }[];
 }
 
 export interface Desktop {
@@ -19,14 +20,20 @@ function isProject(value: unknown): value is Project {
   if (!value || typeof value !== "object") return false;
   const project = value as Record<string, unknown>;
   return project.version === 1 && typeof project.name === "string" &&
-    Array.isArray(project.tickets) && project.tickets.every((ticket: unknown) =>
+    Array.isArray(project.tags) && (project.tags as unknown[]).every((tag: unknown) =>
+      !!tag && typeof tag === "object" &&
+      typeof (tag as Record<string, unknown>).id === "string" &&
+      typeof (tag as Record<string, unknown>).name === "string" &&
+      ((tag as Record<string, unknown>).color === undefined || typeof (tag as Record<string, unknown>).color === "string")) &&
+    Array.isArray(project.tickets) && (project.tickets as unknown[]).every((ticket: unknown) =>
       !!ticket && typeof ticket === "object" &&
       typeof (ticket as Record<string, unknown>).id === "string" &&
       typeof (ticket as Record<string, unknown>).title === "string" &&
       ["todo", "in-progress", "done"].includes((ticket as Record<string, unknown>).status as string) &&
       typeof (ticket as Record<string, unknown>).order === "number" &&
       ((ticket as Record<string, unknown>).body === undefined || typeof (ticket as Record<string, unknown>).body === "string") &&
-      ((ticket as Record<string, unknown>).archived === undefined || typeof (ticket as Record<string, unknown>).archived === "boolean"));
+      ((ticket as Record<string, unknown>).archived === undefined || typeof (ticket as Record<string, unknown>).archived === "boolean") &&
+      ((ticket as Record<string, unknown>).tagIds === undefined || (Array.isArray((ticket as Record<string, unknown>).tagIds) && ((ticket as Record<string, unknown>).tagIds as unknown[]).every((id: unknown) => typeof id === "string"))));
 }
 
 export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChanges(): boolean } {
@@ -282,6 +289,76 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     await save();
   }
 
+  async function addTag(name: string, color?: string): Promise<string> {
+    if (!project || busy) return "";
+    const tagId = crypto.randomUUID();
+    project.tags.push({ id: tagId, name, color });
+    dirty = true;
+    render();
+    await save();
+    return tagId;
+  }
+
+  async function renameTag(tagId: string, newName: string): Promise<void> {
+    if (!project || busy) return;
+    const tag = project.tags.find((t) => t.id === tagId);
+    if (!tag) return;
+    tag.name = newName;
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function changeTagColor(tagId: string, newColor: string): Promise<void> {
+    if (!project || busy) return;
+    const tag = project.tags.find((t) => t.id === tagId);
+    if (!tag) return;
+    tag.color = newColor;
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function deleteTag(tagId: string): Promise<void> {
+    if (!project || busy) return;
+    if (!confirm("Delete this tag? It will be removed from all tickets.")) return;
+    project.tags = project.tags.filter((t) => t.id !== tagId);
+    // Remove tag from all tickets
+    project.tickets.forEach((ticket) => {
+      if (ticket.tagIds) {
+        ticket.tagIds = ticket.tagIds.filter((id) => id !== tagId);
+      }
+    });
+    dirty = true;
+    render();
+    await save();
+  }
+
+  async function addTagToTicket(ticketId: string, tagId: string): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    if (!ticket.tagIds) {
+      ticket.tagIds = [];
+    }
+    if (!ticket.tagIds.includes(tagId)) {
+      ticket.tagIds.push(tagId);
+      dirty = true;
+      render();
+      await save();
+    }
+  }
+
+  async function removeTagFromTicket(ticketId: string, tagId: string): Promise<void> {
+    if (!project || busy) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket || !ticket.tagIds) return;
+    ticket.tagIds = ticket.tagIds.filter((id) => id !== tagId);
+    dirty = true;
+    render();
+    await save();
+  }
+
   async function save(): Promise<void> {
     if (!project || busy) return;
     busy = true;
@@ -312,7 +389,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
       if (!selected) return;
       if (create) {
         const name = selected.split(/[\\/]/).pop()?.replace(/\.littlekanban$/i, "") || "Project";
-        const next: Project = { version: 1, name, tickets: [] };
+        const next: Project = { version: 1, name, tags: [], tickets: [] };
         previous = await desktop.writeProject(selected, next, null);
         project = next;
       } else {

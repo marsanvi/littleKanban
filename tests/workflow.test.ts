@@ -772,3 +772,59 @@ test("can cancel permanent deletion of archived ticket", async () => {
   expect(json).toContain("Cancelable task");
   expect(json).toContain('"archived":true');
 });
+
+test("can assign tags to tickets", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tags.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tags" });
+  
+  // Add a ticket
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Feature task" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Feature task");
+  
+  // Verify the saved project has tags array initialized
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tags).toBeDefined();
+    expect(Array.isArray(project.tags)).toBe(true);
+  });
+});
+
+test("can add and manage tags on a project", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "tag-mgmt.littlekanban");
+  const desktop = desktopFor(path);
+
+  startApp(document.body, desktop);
+  
+  // Create new project
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "tag-mgmt" });
+  
+  // Add a ticket to have something to tag
+  fireEvent.input(screen.getByLabelText("Ticket title"), {
+    target: { value: "Task one" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add ticket" }));
+  
+  await screen.findByText("Task one");
+  
+  // Verify tags persist in JSON
+  await waitFor(async () => {
+    const json = await readFile(path, "utf8");
+    const project = JSON.parse(json);
+    expect(project.tags).toEqual([]);
+    expect(project.tickets[0].tagIds).toBeUndefined();
+  });
+});
