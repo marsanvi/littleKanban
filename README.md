@@ -4,7 +4,7 @@ Little Kanban to take away.
 
 littleKanban is an idea for a small, portable canvas for organizing work across
 multiple projects. Each project lives in its own file, making it easy to take
-with you, back up, and import or export.
+with you and back up.
 
 ## The idea
 
@@ -27,11 +27,34 @@ For example, you could share one project with a friend for a small piece of
 work, and keep another with your partner to plan the year or a holiday. Each
 project would have its own file and could be shared with the people involved.
 
-## Status
+## Early desktop prototype
 
-This project is at the idea stage. The application, project file format, and
-import/export workflow have not been implemented yet. How shared files will
-handle simultaneous edits and synchronization conflicts is still to be decided.
+The desktop application can create a project, add title-only tickets, and reopen
+the same file. Choose any local folder, including a sync folder, using the native
+file dialog. Tickets are saved automatically; errors leave them visible for retry.
+
+The JSON project format is **provisional**. Concurrent editing and sync conflict
+recovery are not yet safe or implemented. Do not rely on this prototype for
+shared edits or as your only copy. See [file feasibility](docs/file-feasibility.md).
+
+### Develop and run
+
+Install Node.js, Rust, and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/).
+Then run:
+
+```sh
+npm ci
+npm run tauri dev
+```
+
+For a release build, run `npm run tauri build`. On Windows, the prerequisites
+include Microsoft C++ Build Tools and WebView2; on macOS, install Xcode or its
+command-line tools. A macOS debug bundle was built and launched, but its UI
+was not manually exercised. Windows execution and packaging have not yet been
+verified.
+
+Run the frontend workflow tests with `npm test` and the native file tests with
+`cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## License
 
