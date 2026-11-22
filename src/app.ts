@@ -138,6 +138,18 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
     editPanel.hidden = true;
   }
 
+  async function updateAndSaveTicket(ticketId: string, title: string, body: string): Promise<void> {
+    if (!project) return;
+    const ticket = project.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+    ticket.title = title;
+    ticket.body = body;
+    dirty = true;
+    closeEditPanel();
+    render();
+    await save();
+  }
+
   async function save(): Promise<void> {
     if (!project || busy) return;
     busy = true;
@@ -203,14 +215,7 @@ export function startApp(root: HTMLElement, desktop: Desktop): { hasUnsavedChang
   
   saveEditBtn.addEventListener("click", () => {
     if (!project || busy || !editingTicketId) return;
-    const ticket = project.tickets.find((t) => t.id === editingTicketId);
-    if (!ticket) return;
-    ticket.title = editTitle.value.trim();
-    ticket.body = editBody.value;
-    dirty = true;
-    closeEditPanel();
-    render();
-    void save();
+    void updateAndSaveTicket(editingTicketId, editTitle.value.trim(), editBody.value);
   });
   
   cancelEditBtn.addEventListener("click", () => {
