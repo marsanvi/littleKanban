@@ -1,3 +1,8 @@
+## Git workflow
+
+Create a task-specific feature branch before making changes. Keep `main` stable
+and propose changes through a pull request.
+
 ## Agent skills
 
 ### Issue tracker
