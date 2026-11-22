@@ -1312,3 +1312,139 @@ test("calendar shows due tickets on their dates and navigates months", async () 
   expect(screen.getByRole("heading", { name: "Edit Ticket" })).toBeTruthy();
   expect((screen.getByLabelText("Due date") as HTMLInputElement).value).toBe(nextDueDate);
 });
+
+test("creates a to-do ticket with the calendar day as its due date", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "calendar-create.littlekanban");
+  const desktop = desktopFor(path);
+  const currentDate = new Date();
+  const dueDate = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, "0")}-15`;
+
+  startApp(document.body, desktop);
+  fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+  await screen.findByRole("heading", { name: "calendar-create" });
+  fireEvent.click(screen.getByRole("button", { name: "View calendar" }));
+
+  const calendar = within(document.getElementById("calendar-panel") as HTMLElement);
+  const day = document.querySelector(`#calendar-days time[datetime="${dueDate}"]`)?.closest("li");
+  if (!day) throw new Error(`Could not find calendar day ${dueDate}`);
+  fireEvent.click(within(day).getByRole("button", { name: `Add ticket for ${dueDate}` }));
+  const dayForm = document.querySelector(`#calendar-days time[datetime="${dueDate}"]`)?.closest("li");
+  if (!dayForm) throw new Error(`Could not find calendar form for ${dueDate}`);
+  const dayControls = within(dayForm);
+  const ticketTitle = dayControls.getByLabelText(`Ticket title for ${dueDate}`) as HTMLInputElement;
+  expect(document.activeElement).toBe(ticketTitle);
+  fireEvent.input(ticketTitle, {
+    target: { value: "Prepare itinerary" },
+  });
+  fireEvent.click(dayControls.getByRole("button", { name: "Add ticket" }));
+
+  await waitFor(async () => {
+    const savedProject = JSON.parse(await readFile(path, "utf8")) as Project;
+    expect(savedProject.tickets).toEqual([
+      expect.objectContaining({ title: "Prepare itinerary", status: "todo", dueDate }),
+    ]);
+  });
+  expect(within(document.getElementById("todo-tickets") as HTMLElement).getByText("Prepare itinerary")).toBeTruthy();
+  const calendarTicket = calendar.getByRole("button", { name: "edit Prepare itinerary" });
+  expect(calendarTicket).toBeTruthy();
+  await waitFor(() => expect(document.activeElement).toBe(calendarTicket));
+});
+
+test("reschedules a calendar ticket by dragging it to another day", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "calendar-drag.littlekanban");
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const originalDate = `${year}-${month}-10`;
+  const newDate = `${year}-${month}-25`;
+  const project: Project = {
+    version: 1,
+    name: "calendar-drag",
+    tags: [],
+    members: [],
+    tickets: [{ id: "drag-me", title: "Reschedule me", status: "todo", order: 0, dueDate: originalDate }],
+  };
+  await writeFile(path, JSON.stringify(project));
+
+  startApp(document.body, desktopFor(path));
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByRole("heading", { name: "calendar-drag" });
+  fireEvent.click(screen.getByRole("button", { name: "View calendar" }));
+  const calendar = within(document.getElementById("calendar-panel") as HTMLElement);
+  const ticket = calendar.getByRole("button", { name: "edit Reschedule me" });
+  const targetDay = document.querySelector(`#calendar-days time[datetime="${newDate}"]`)?.closest("li");
+  if (!targetDay) throw new Error(`Could not find calendar day ${newDate}`);
+  expect((ticket as HTMLButtonElement).draggable).toBe(true);
+
+  const transferredData = new Map<string, string>();
+  const dataTransfer = {
+    setData: (type: string, value: string) => transferredData.set(type, value),
+    getData: (type: string) => transferredData.get(type) ?? "",
+  };
+  const dispatchDrag = (target: Element, type: string) => {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+    target.dispatchEvent(event);
+  };
+  dispatchDrag(ticket, "dragstart");
+  dispatchDrag(targetDay, "dragover");
+  dispatchDrag(targetDay, "drop");
+
+  await waitFor(async () => {
+    const savedProject = JSON.parse(await readFile(path, "utf8")) as Project;
+    expect(savedProject.tickets[0].dueDate).toBe(newDate);
+  });
+  const updatedOriginalDay = document.querySelector(`#calendar-days time[datetime="${originalDate}"]`)?.closest("li");
+  const updatedTargetDay = document.querySelector(`#calendar-days time[datetime="${newDate}"]`)?.closest("li");
+  expect(updatedOriginalDay).toBeTruthy();
+  expect(updatedTargetDay).toBeTruthy();
+  expect(within(updatedOriginalDay as HTMLElement).queryByRole("button", { name: "edit Reschedule me" })).toBeNull();
+  expect(within(updatedTargetDay as HTMLElement).getByRole("button", { name: "edit Reschedule me" })).toBeTruthy();
+  const boardTicket = within(document.getElementById("todo-tickets") as HTMLElement)
+    .getByText("Reschedule me")
+    .closest("li");
+  expect(boardTicket?.querySelector("time")?.getAttribute("datetime")).toBe(newDate);
+});
+
+test("reschedules a calendar ticket through the editor date field", async () => {
+  directory = await mkdtemp(join(tmpdir(), "littlekanban-"));
+  const path = join(directory, "calendar-editor.littlekanban");
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const originalDate = `${year}-${month}-10`;
+  const newDate = `${year}-${month}-25`;
+  const project: Project = {
+    version: 1,
+    name: "calendar-editor",
+    tags: [],
+    members: [],
+    tickets: [{ id: "edit-date", title: "Change my date", status: "todo", order: 0, dueDate: originalDate }],
+  };
+  await writeFile(path, JSON.stringify(project));
+
+  startApp(document.body, desktopFor(path));
+  fireEvent.click(screen.getByRole("button", { name: "Open project" }));
+  await screen.findByRole("heading", { name: "calendar-editor" });
+  fireEvent.click(screen.getByRole("button", { name: "View calendar" }));
+  const calendar = within(document.getElementById("calendar-panel") as HTMLElement);
+  fireEvent.click(calendar.getByRole("button", { name: "edit Change my date" }));
+
+  const dueDate = screen.getByLabelText("Due date") as HTMLInputElement;
+  expect(dueDate.type).toBe("date");
+  fireEvent.input(dueDate, { target: { value: newDate } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+  await waitFor(async () => {
+    const savedProject = JSON.parse(await readFile(path, "utf8")) as Project;
+    expect(savedProject.tickets[0].dueDate).toBe(newDate);
+  });
+  const movedTicket = calendar.getByRole("button", { name: "edit Change my date" });
+  expect(movedTicket.closest("li")?.querySelector("time")?.getAttribute("datetime")).toBe(newDate);
+  const boardTicket = within(document.getElementById("todo-tickets") as HTMLElement)
+    .getByText("Change my date")
+    .closest("li");
+  expect(boardTicket?.querySelector("time")?.getAttribute("datetime")).toBe(newDate);
+});
